@@ -75,6 +75,18 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Persistent status bar state monitor across screen locks" />
         </service>
+            <!-- Servizio per rilevare istantaneamente la chiusura del Centro di Controllo -->
+            <service
+                android:name=".service.CleanBarAccessibilityService"
+                android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+                android:exported="true">
+                <intent-filter>
+                    <action android:name="android.accessibilityservice.AccessibilityService" />
+                </intent-filter>
+                <meta-data
+                    android:name="android.accessibilityservice"
+                    android:resource="@xml/accessibility_service_config" />
+            </service>
 
         <!-- Boot Receiver for Auto Re-apply on Device Restart -->
         <receiver
