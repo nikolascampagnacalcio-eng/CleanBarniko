@@ -1,0 +1,100 @@
+ <?xml version="1.0" encoding="utf-8"?>
+    <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+        android:accessibilityEventTypes="typeWindowStateChanged|typeWindowsChanged"
+        android:accessibilityFeedbackType="feedbackGeneric"
+        android:accessibilityFlags="flagDefault|flagRetrieveInteractiveWindows"
+        android:canRetrieveWindowContent="false"
+        android:notificationTimeout="50" />
+  4. Clicca sul pulsante verde Commit changes... e conferma.
+  ──────
+  ### Passo 3: Il rilevatore di chiusura Centro di Controllo
+
+  1. Clicca di nuovo su Add file ➔ Create new file.
+  2. Come nome del file scrivi:
+    android-app/app/src/main/java/com/cleanbar/hider/service/CleanBarAccessibilityService.kt
+  3. Nel riquadro del testo, incolla questo codice:
+    package com.cleanbar.hider.service
+
+    import android.accessibilityservice.AccessibilityService
+    import android.view.accessibility.AccessibilityEvent
+    import com.cleanbar.hider.shizuku.ImmersiveController
+    import com.cleanbar.hider.util.AppLogger
+    import com.cleanbar.hider.util.PreferencesHelper
+    import kotlinx.coroutines.CoroutineScope
+    import kotlinx.coroutines.Dispatchers
+    import kotlinx.coroutines.Job
+    import kotlinx.coroutines.SupervisorJob
+    import kotlinx.coroutines.cancel
+    import kotlinx.coroutines.delay
+    import kotlinx.coroutines.launch
+
+    class CleanBarAccessibilityService : AccessibilityService() {
+
+        private val serviceJob = SupervisorJob()
+        private val serviceScope = CoroutineScope(Dispatchers.Main + serviceJob)
+        private var reapplyJob: Job? = null
+        private var wasSystemUiActive: Boolean = false
+        private var lastEventTime: Long = 0
+
+        override fun onServiceConnected() {
+            super.onServiceConnected()
+            AppLogger.i("AccessibilityService", "CleanBar Accessibility Service connesso")
+        }
+
+        override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+            if (event == null) return
+
+            val eventType = event.eventType
+            val packageName = event.packageName?.toString() ?: ""
+
+            if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+                eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED
+            ) {
+                val isSystemUi = packageName == "com.android.systemui"
+
+                // Rileva quando esci da SystemUI (quando chiudi il Centro di Controllo o le
+                notifiche)
+                if (wasSystemUiActive && !isSystemUi && packageName.isNotEmpty()) {
+                    val now = System.currentTimeMillis()
+                    if (now - lastEventTime > 200) { // Debounce per evitare chiamate duplicate
+                        lastEventTime = now
+                        AppLogger.i("AccessibilityService", "Chiusura Centro di Controllo rilevata ->
+                        riapplico nascondi orologio")
+                        scheduleReapply()
+                    }
+                }
+
+                wasSystemUiActive = isSystemUi
+            }
+        }
+
+        private fun scheduleReapply() {
+            if (!PreferencesHelper.isTargetHidden(this)) return
+
+            reapplyJob?.cancel()
+            reapplyJob = serviceScope.launch(Dispatchers.IO) {
+                try {
+                    // Passata 1: Immediata (resetta e riapplica il flag orologio)
+                    ImmersiveController.hideStatusBar(applicationContext)
+
+                    // Passata 2: Dopo 250ms per coprire la fine dell'animazione di OriginOS
+                    delay(250)
+                    if (PreferencesHelper.isTargetHidden(applicationContext)) {
+                        ImmersiveController.hideStatusBar(applicationContext)
+                    }
+                } catch (e: Throwable) {
+                    AppLogger.e("AccessibilityService", "Errore nel riapplicare", e)
+                }
+            }
+        }
+
+        override fun onInterrupt() {
+            AppLogger.w("AccessibilityService", "Servizio interrotto")
+        }
+
+        override fun onDestroy() {
+            super.onDestroy()
+            reapplyJob?.cancel()
+            serviceScope.cancel()
+        }
+    }
